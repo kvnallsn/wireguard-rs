@@ -8,12 +8,13 @@ pub use endpoint::Endpoint;
 
 #[cfg(target_os = "linux")]
 #[path = "linux/mod.rs"]
-pub use linux as plt;
+pub mod plt;
 
 #[cfg(target_os = "macos")]
 #[path = "macos/mod.rs"]
 pub mod plt;
 
+#[cfg(target_family = "unix")]
 pub(crate) mod unix;
 
 #[cfg(test)]
