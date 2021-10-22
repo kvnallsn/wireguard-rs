@@ -23,11 +23,10 @@ use std::env;
 use std::process::exit;
 use std::thread;
 
-use configuration::Configuration;
-
-use platform::tun::{PlatformTun, Status};
-use platform::uapi::{BindUAPI, PlatformUAPI};
-use platform::*;
+use platform::{
+    uapi::{BindUAPI, PlatformUAPI},
+    Tun, UAPI, UDP,
+};
 
 use wireguard::WireGuard;
 
@@ -88,13 +87,13 @@ fn main() {
     };
 
     // create UAPI socket
-    let uapi = plt::UAPI::bind(name.as_str()).unwrap_or_else(|e| {
+    let uapi = UAPI::bind(name.as_str()).unwrap_or_else(|e| {
         eprintln!("Failed to create UAPI listener: {}", e);
         exit(-2);
     });
 
     // create TUN device
-    let (mut readers, writer, status) = plt::Tun::create(name.as_str()).unwrap_or_else(|e| {
+    let device = Tun::builder().build(name.as_str()).unwrap_or_else(|e| {
         eprintln!("Failed to create TUN device: {}", e);
         exit(-3);
     });
@@ -133,38 +132,16 @@ fn main() {
     profiler_start(name.as_str());
 
     // create WireGuard device
-    let wg: WireGuard<plt::Tun, plt::UDP> = WireGuard::new(writer);
+    let wg: WireGuard<Tun, UDP> = WireGuard::new(device.writer());
 
     // add all Tun readers
+    let mut readers = device.readers();
     while let Some(reader) = readers.pop() {
         wg.add_tun_reader(reader);
     }
 
     // wrap in configuration interface
     let cfg = configuration::WireGuardConfig::new(wg.clone());
-
-    // start Tun event thread
-    {
-        let cfg = cfg.clone();
-        let mut status = status;
-        thread::spawn(move || loop {
-            match status.event() {
-                Err(e) => {
-                    log::info!("Tun device error {}", e);
-                    profiler_stop();
-                    exit(0);
-                }
-                Ok(tun::TunEvent::Up(mtu)) => {
-                    log::info!("Tun up (mtu = {})", mtu);
-                    let _ = cfg.up(mtu); // TODO: handle
-                }
-                Ok(tun::TunEvent::Down) => {
-                    log::info!("Tun down");
-                    cfg.down();
-                }
-            }
-        });
-    }
 
     // start UAPI server
     thread::spawn(move || loop {

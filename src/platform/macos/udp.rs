@@ -1,5 +1,4 @@
-use super::super::udp::*;
-use super::super::Endpoint;
+use crate::platform::{udp::*, Endpoint};
 
 use std::fmt;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};

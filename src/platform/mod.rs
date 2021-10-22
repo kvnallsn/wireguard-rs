@@ -1,21 +1,24 @@
-mod endpoint;
-
 pub mod tun;
 pub mod uapi;
 pub mod udp;
 
+mod endpoint;
 pub use endpoint::Endpoint;
 
 #[cfg(target_os = "linux")]
-#[path = "linux/mod.rs"]
-pub mod plt;
+mod linux;
+#[cfg(target_os = "linux")]
+pub use self::linux::UDP;
 
 #[cfg(target_os = "macos")]
-#[path = "macos/mod.rs"]
-pub mod plt;
+mod macos;
+#[cfg(target_os = "macos")]
+pub use self::macos::UDP;
 
 #[cfg(target_family = "unix")]
-pub(crate) mod unix;
+mod unix;
+#[cfg(target_family = "unix")]
+pub use self::unix::{Tun, UAPI};
 
 #[cfg(test)]
 pub mod dummy;
