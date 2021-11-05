@@ -19,11 +19,11 @@ mod wireguard;
 
 mod util;
 
-use std::{env, process::exit, thread, sync::Arc};
 use platform::{
     uapi::{BindUAPI, PlatformUAPI},
     UAPI, UDP,
 };
+use std::{env, process::exit, sync::Arc, thread};
 
 use tun_rs::{OsTun, TunConfig};
 

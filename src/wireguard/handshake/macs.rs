@@ -213,8 +213,7 @@ impl Validator {
 
     fn get_tau(&self, src: &[u8]) -> Option<[u8; SIZE_COOKIE]> {
         let secret = self.secret.read();
-        if secret.is_still_valid()
-        {
+        if secret.is_still_valid() {
             Some(MAC!(&secret.value, src))
         } else {
             None

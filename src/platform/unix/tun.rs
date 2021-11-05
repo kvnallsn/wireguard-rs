@@ -1,13 +1,8 @@
 //! Platform-Agnostic tunnel
 
 use super::super::tun::*;
-use std::{
-    error::Error,
-    io,
-    fmt,
-    sync::Arc,
-};
-use tun_rs::{Tun as _, OsTun};
+use std::{error::Error, fmt, io, sync::Arc};
+use tun_rs::{OsTun, Tun as _};
 
 pub struct UnixTun(Arc<OsTun>);
 
@@ -22,7 +17,6 @@ impl Tun for OsTun {
     type Writer = UnixTun;
     type Reader = UnixTun;
     type Error = UnixTunError;
-
 }
 impl fmt::Display for UnixTunError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -48,7 +42,9 @@ impl Reader for UnixTun {
     type Error = UnixTunError;
 
     fn read(&self, buf: &mut [u8], offset: usize) -> Result<usize, Self::Error> {
-        self.0.read_packet(&mut buf[offset..]).map_err(|e| UnixTunError::Tun(e))?; 
+        self.0
+            .read_packet(&mut buf[offset..])
+            .map_err(|e| UnixTunError::Tun(e))?;
         Ok(0)
         /*
         use libc::{iovec, msghdr, recvmsg};
@@ -91,7 +87,9 @@ impl Writer for UnixTun {
     type Error = UnixTunError;
 
     fn write(&self, src: &[u8]) -> Result<(), Self::Error> {
-        self.0.write_packet(src, 0x02).map_err(|e| UnixTunError::IO(e))?;
+        self.0
+            .write_packet(src, 0x02)
+            .map_err(|e| UnixTunError::IO(e))?;
         Ok(())
         /*
         use libc::{iovec, msghdr, sendmsg};
