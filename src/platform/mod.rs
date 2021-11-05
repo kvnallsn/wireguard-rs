@@ -18,7 +18,7 @@ pub use self::macos::UDP;
 #[cfg(target_family = "unix")]
 mod unix;
 #[cfg(target_family = "unix")]
-pub use self::unix::{Tun, UAPI};
+pub use self::unix::UAPI;
 
 #[cfg(test)]
 pub mod dummy;

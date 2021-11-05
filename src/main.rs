@@ -19,14 +19,13 @@ mod wireguard;
 
 mod util;
 
-use std::env;
-use std::process::exit;
-use std::thread;
-
+use std::{env, process::exit, thread, sync::Arc};
 use platform::{
     uapi::{BindUAPI, PlatformUAPI},
-    Tun, UAPI, UDP,
+    UAPI, UDP,
 };
+
+use tun_rs::{OsTun, TunConfig};
 
 use wireguard::WireGuard;
 
@@ -93,10 +92,11 @@ fn main() {
     });
 
     // create TUN device
-    let device = Tun::builder().build(name.as_str()).unwrap_or_else(|e| {
+    let device = OsTun::create(TunConfig::default()).unwrap_or_else(|e| {
         eprintln!("Failed to create TUN device: {}", e);
         exit(-3);
     });
+    let device = Arc::new(device);
 
     // drop privileges
     if drop_privileges {
@@ -132,13 +132,10 @@ fn main() {
     profiler_start(name.as_str());
 
     // create WireGuard device
-    let wg: WireGuard<Tun, UDP> = WireGuard::new(device.writer());
+    let wg: WireGuard<OsTun, UDP> = WireGuard::new(device.clone());
 
     // add all Tun readers
-    let mut readers = device.readers();
-    while let Some(reader) = readers.pop() {
-        wg.add_tun_reader(reader);
-    }
+    wg.add_tun_reader(device.clone());
 
     // wrap in configuration interface
     let cfg = configuration::WireGuardConfig::new(wg.clone());

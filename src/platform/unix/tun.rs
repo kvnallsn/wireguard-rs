@@ -3,41 +3,32 @@
 use super::super::tun::*;
 use std::{
     error::Error,
+    io,
     fmt,
-    net::Ipv4Addr,
-    os::unix::io::{AsRawFd, RawFd},
+    sync::Arc,
 };
-use tun::platform::Device;
+use tun_rs::{Tun as _, OsTun};
 
-pub struct UnixTun {
-    device: Device,
-}
-
-#[derive(Debug, Default)]
-pub struct UnixTunBuilder {
-    ip: Option<Ipv4Addr>,
-    netmask: Option<Ipv4Addr>,
-    mtu: Option<i32>,
-}
-
-pub struct UnixTunReader {
-    fd: RawFd,
-}
-
-pub struct UnixTunWriter {
-    fd: RawFd,
-}
+pub struct UnixTun(Arc<OsTun>);
 
 #[derive(Debug)]
 pub enum UnixTunError {
-    Tun(tun::Error),
+    Tun(tun_rs::TunError),
+    IO(io::Error),
     Closed,
 }
 
+impl Tun for OsTun {
+    type Writer = UnixTun;
+    type Reader = UnixTun;
+    type Error = UnixTunError;
+
+}
 impl fmt::Display for UnixTunError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             UnixTunError::Tun(e) => write!(f, "Tunnel error: {}", e),
+            UnixTunError::IO(e) => write!(f, "Tunnel i/o error: {}", e),
             UnixTunError::Closed => write!(f, "Tunnel device closed"),
         }
     }
@@ -53,10 +44,13 @@ impl Error for UnixTunError {
     }
 }
 
-impl Reader for UnixTunReader {
+impl Reader for UnixTun {
     type Error = UnixTunError;
 
     fn read(&self, buf: &mut [u8], offset: usize) -> Result<usize, Self::Error> {
+        self.0.read_packet(&mut buf[offset..]).map_err(|e| UnixTunError::Tun(e))?; 
+        Ok(0)
+        /*
         use libc::{iovec, msghdr, recvmsg};
         use std::ptr::null_mut;
         let mut _hdr = [0u8; 4];
@@ -89,13 +83,17 @@ impl Reader for UnixTunReader {
             0..=4 => Ok(0),
             n => Ok((n - 4) as usize),
         }
+        */
     }
 }
 
-impl Writer for UnixTunWriter {
+impl Writer for UnixTun {
     type Error = UnixTunError;
 
     fn write(&self, src: &[u8]) -> Result<(), Self::Error> {
+        self.0.write_packet(src, 0x02).map_err(|e| UnixTunError::IO(e))?;
+        Ok(())
+        /*
         use libc::{iovec, msghdr, sendmsg};
         use std::ptr::null_mut;
         let _hdr = [0u8, 0u8, 0u8, 2u8];
@@ -128,97 +126,6 @@ impl Writer for UnixTunWriter {
             -1 => Err(UnixTunError::Closed),
             _ => Ok(()),
         }
-    }
-}
-
-impl Tun for UnixTun {
-    type Writer = UnixTunWriter;
-    type Reader = UnixTunReader;
-    type Error = UnixTunError;
-}
-
-impl UnixTun {
-    /// Creates a new unix tunnel device
-    pub fn builder() -> UnixTunBuilder {
-        UnixTunBuilder::default()
-    }
-
-    pub fn readers(&self) -> Vec<UnixTunReader> {
-        vec![UnixTunReader {
-            fd: self.device.as_raw_fd(),
-        }]
-    }
-
-    pub fn writer(&self) -> UnixTunWriter {
-        UnixTunWriter {
-            fd: self.device.as_raw_fd(),
-        }
-    }
-}
-
-impl UnixTunBuilder {
-    /// Sets the IP address of this TUN device
-    ///
-    /// # Arguments
-    /// * `ip` - IP address to assign to this TUN device
-    pub fn ip(&mut self, ip: Ipv4Addr) -> &mut Self {
-        self.ip = Some(ip);
-        self
-    }
-
-    /// Sets the netmask of this TUN device
-    ///
-    /// # Arguments
-    /// * `netmask` - Subnet mask of Ipv4 address
-    pub fn netmask(&mut self, netmask: Ipv4Addr) -> &mut Self {
-        self.netmask = Some(netmask);
-        self
-    }
-
-    /// Sets the Maximum Transfer Unit (MTU)
-    ///
-    /// # Arguments
-    /// * `mtu` - Maxmium amount of data to send in one packet
-    pub fn mtu(&mut self, mtu: i32) -> &mut Self {
-        self.mtu = Some(mtu);
-        self
-    }
-
-    /// Creates the TUN device with the supplied paramters
-    ///
-    /// # Arguments
-    /// * `name` - Name to assign to this TUN device
-    ///
-    /// # Errors
-    /// * `UnixTunError::Tun` - TUN device fails to create
-    pub fn build(&mut self, name: &str) -> Result<UnixTun, UnixTunError> {
-        let mut config = tun::Configuration::default();
-
-        let mut cfg = config
-            .name(name)
-            .layer(tun::Layer::L3)
-            .mtu(self.mtu.unwrap_or(1430));
-
-        if let Some(ip) = self.ip {
-            cfg = cfg.address(ip);
-        }
-
-        if let Some(netmask) = self.netmask {
-            cfg = cfg.netmask(netmask);
-        }
-
-        cfg.up();
-
-        #[cfg(target_os = "linux")]
-        config.platform(|config| {
-            config.packet_information(false);
-        });
-
-        log::info!("creating tunnel device");
-        let device = tun::create(&config).map_err(|e| UnixTunError::Tun(e))?;
-
-        log::info!("created tunnel device");
-
-        Ok(UnixTun { device })
+        */
     }
 }
