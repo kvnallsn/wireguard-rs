@@ -1,4 +1,5 @@
 use std::error::Error;
+use tun_rs::{Tun as Device, TunError};
 
 pub enum TunEvent {
     Up(usize), // interface is up (supply MTU)
@@ -60,4 +61,38 @@ pub trait PlatformTun: Tun {
 
     #[allow(clippy::type_complexity)]
     fn create(name: &str) -> Result<(Vec<Self::Reader>, Self::Writer, Self::Status), Self::Error>;
+}
+
+impl<T> Tun for T
+where
+    T: Device + Send + Sync + 'static,
+{
+    type Writer = T;
+    type Reader = T;
+    type Error = TunError;
+}
+
+impl<T> Reader for T
+where
+    T: Device + Send + Sync + 'static,
+{
+    type Error = TunError;
+
+    fn read(&self, buf: &mut [u8], offset: usize) -> Result<usize, Self::Error> {
+        let (sz, _) = self.read_packet(&mut buf[offset..])?;
+        Ok(sz)
+    }
+}
+
+impl<T> Writer for T
+where
+    T: Device + Send + Sync + 'static,
+{
+    type Error = TunError;
+
+    fn write(&self, src: &[u8]) -> Result<(), Self::Error> {
+        let pktinfo = self.blank_pktinfo();
+        self.write_packet(src, pktinfo)?;
+        Ok(())
+    }
 }
