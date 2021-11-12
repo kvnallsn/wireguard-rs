@@ -12,7 +12,7 @@ fn main() {
     color_eyre::install().expect("failed to install color_eyre handler");
 
     tracing_subscriber::FmtSubscriber::builder()
-        .with_max_level(tracing::Level::TRACE)
+        .with_max_level(tracing::Level::DEBUG)
         .with_thread_names(true)
         .init();
 

@@ -278,6 +278,7 @@ impl Writer<BsdEndpoint> for BsdUdp {
 
                 log::debug!("[udp wr] src ip: {:?}", src);
                 log::debug!("[udp wr] dst ip: {:?}", dst);
+                log::trace!("[udp wr] {:?}", buf);
 
                 let mut iovs = [libc::iovec {
                     iov_base: buf.as_ptr() as *mut libc::c_void,
