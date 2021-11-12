@@ -9,9 +9,10 @@ fn main() {
     ctrlc::set_handler(move || tx.send(()).expect("failed to send ctrlc signal"))
         .expect("failed to set ctrlc handler");
 
+    color_eyre::install().expect("failed to install color_eyre handler");
+
     tracing_subscriber::FmtSubscriber::builder()
-        .pretty()
-        .with_max_level(tracing::Level::DEBUG)
+        .with_max_level(tracing::Level::TRACE)
         .with_thread_names(true)
         .init();
 

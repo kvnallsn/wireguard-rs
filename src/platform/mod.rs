@@ -15,6 +15,11 @@ mod macos;
 #[cfg(target_os = "macos")]
 pub use self::macos::UDP;
 
+#[cfg(target_os = "freebsd")]
+mod bsd;
+#[cfg(target_os = "freebsd")]
+pub use self::bsd::UDP;
+
 #[cfg(target_family = "unix")]
 mod unix;
 #[cfg(target_family = "unix")]

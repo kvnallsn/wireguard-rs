@@ -25,7 +25,7 @@ use platform::{
 };
 use std::{env, process::exit, thread};
 
-use tun_rs::{OsConfig, TunConfig, TunDevice};
+use tun_rs::{TunConfig, TunDevice};
 
 use wireguard::WireGuard;
 

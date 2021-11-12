@@ -64,6 +64,7 @@ profiler = ["cpuprofiler"]
 start_up = []
 
 [dev-dependencies]
+color-eyre = "0.5"
 ctrlc = "^3.2"
 pnet = "^0.27"
 proptest = "^0.10"
