@@ -23,9 +23,9 @@ use platform::{
     uapi::{BindUAPI, PlatformUAPI},
     UAPI, UDP,
 };
-use std::{env, process::exit, sync::Arc, thread};
+use std::{env, process::exit, thread};
 
-use tun_rs::{OsTun, TunConfig};
+use tun_rs::{OsConfig, TunConfig, TunDevice};
 
 use wireguard::WireGuard;
 
@@ -92,11 +92,10 @@ fn main() {
     });
 
     // create TUN device
-    let device = OsTun::create(TunConfig::default()).unwrap_or_else(|e| {
+    let device = TunDevice::create(TunConfig::default().name(&name)).unwrap_or_else(|e| {
         eprintln!("Failed to create TUN device: {}", e);
         exit(-3);
     });
-    let device = Arc::new(device);
 
     // drop privileges
     if drop_privileges {
@@ -132,7 +131,7 @@ fn main() {
     profiler_start(name.as_str());
 
     // create WireGuard device
-    let wg: WireGuard<OsTun, UDP> = WireGuard::new(device.clone());
+    let wg: WireGuard<TunDevice, UDP> = WireGuard::new(device.clone());
 
     // add all Tun readers
     wg.add_tun_reader(device.clone());
