@@ -232,7 +232,10 @@ impl<E: Endpoint, C: Callbacks, T: tun::Writer, B: udp::Writer<E>> PeerInner<E, 
                         .1
                         .as_ref()
                         .ok_or(RouterError::SendError)
-                        .and_then(|w| w.write(msg, endpoint).map_err(|_| RouterError::SendError))
+                        .and_then(|w| w.write(msg, endpoint).map_err(|e| {
+                            log::error!("{}", e);
+                            RouterError::SendError
+                        }))
                 } else {
                     Ok(())
                 }

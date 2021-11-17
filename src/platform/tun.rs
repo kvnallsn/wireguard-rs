@@ -79,6 +79,7 @@ where
     type Error = TunError;
 
     fn read(&self, buf: &mut [u8], offset: usize) -> Result<usize, Self::Error> {
+        log::debug!("[rd] buf len: {}, offset: {}", buf.len(), offset);
         let (sz, _) = self.read_packet(&mut buf[offset..])?;
         Ok(sz)
     }
@@ -91,8 +92,7 @@ where
     type Error = TunError;
 
     fn write(&self, src: &[u8]) -> Result<(), Self::Error> {
-        let pktinfo = self.blank_pktinfo();
-        self.write_packet(src, pktinfo)?;
+        self.write_packet(src, None)?;
         Ok(())
     }
 }

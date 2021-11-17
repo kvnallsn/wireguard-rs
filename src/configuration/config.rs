@@ -28,6 +28,7 @@ pub struct PeerState {
     pub preshared_key: [u8; 32], // 0^32 is the "default value" (though treated like any other psk)
 }
 
+#[derive(Clone)]
 pub struct WireGuardConfig<T: tun::Tun, B: udp::PlatformUDP>(Arc<Mutex<Inner<T, B>>>);
 
 struct Inner<T: tun::Tun, B: udp::PlatformUDP> {
@@ -41,9 +42,7 @@ impl<T: tun::Tun, B: udp::PlatformUDP> WireGuardConfig<T, B> {
     fn lock(&self) -> MutexGuard<Inner<T, B>> {
         self.0.lock().unwrap()
     }
-}
 
-impl<T: tun::Tun, B: udp::PlatformUDP> WireGuardConfig<T, B> {
     pub fn new(wg: WireGuard<T, B>) -> WireGuardConfig<T, B> {
         WireGuardConfig(Arc::new(Mutex::new(Inner {
             wireguard: wg,
@@ -51,12 +50,6 @@ impl<T: tun::Tun, B: udp::PlatformUDP> WireGuardConfig<T, B> {
             bind: None,
             fwmark: None,
         })))
-    }
-}
-
-impl<T: tun::Tun, B: udp::PlatformUDP> Clone for WireGuardConfig<T, B> {
-    fn clone(&self) -> Self {
-        WireGuardConfig(self.0.clone())
     }
 }
 

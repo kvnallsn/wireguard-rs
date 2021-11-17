@@ -3,18 +3,21 @@
 use super::super::{udp::*, Endpoint};
 use nix::{
     errno::Errno,
-    sys::socket::{
-        bind, cmsghdr, getsockname, msghdr, setsockopt, sockaddr_in, sockaddr_in6, socket,
-        sockopt::{Ipv4RecvDstAddr, ReuseAddr, Ipv6V6Only, Ipv6RecvPacketInfo},
-        AddressFamily, InetAddr, SockAddr, SockFlag, SockProtocol, SockType,
+    sys::{
+        socket::{
+            bind, cmsghdr, getsockname, recvmsg, setsockopt, sockaddr_in, sockaddr_in6,
+            socket,
+            sockopt::{Ipv4RecvDstAddr, Ipv6RecvPacketInfo, Ipv6V6Only, ReuseAddr},
+            AddressFamily, ControlMessageOwned, InetAddr, MsgFlags, SockAddr, SockFlag,
+            SockProtocol, SockType, sendmsg
+        },
+        uio::IoVec,
     },
     unistd::close,
 };
 use std::{
-    mem,
-    net::{SocketAddr, SocketAddrV4, SocketAddrV6, IpAddr},
+    net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     os::unix::io::RawFd,
-    ptr,
     sync::Arc,
 };
 
@@ -31,7 +34,7 @@ pub struct BsdUdp {
     socket6: Arc<Fd>,
 
     /// Bound Port
-    port: u16
+    port: u16,
 }
 
 #[derive(Clone, Debug)]
@@ -51,12 +54,14 @@ impl Drop for Fd {
     }
 }
 
+#[derive(Debug)]
 #[repr(C, align(1))]
 struct ControlHeaderV4 {
     hdr: cmsghdr,
     ip: libc::in_addr,
 }
 
+#[derive(Debug)]
 #[repr(C, align(1))]
 struct ControlHeaderV6 {
     hdr: cmsghdr,
@@ -181,8 +186,6 @@ impl BsdUdp {
         let sockaddr = SockAddr::Inet(InetAddr::from_std(&addr));
         bind(fd, &sockaddr)?;
 
-        log::trace!("bound udp socket [port {}, fd = {}]", addr.port(), fd);
-
         // verify assigned port is the same
         let port = match getsockname(fd)? {
             SockAddr::Inet(inet) => match inet {
@@ -194,57 +197,60 @@ impl BsdUdp {
             _ => unreachable!("unknown other socket variant"),
         };
 
-        log::trace!("udp confirmed socket [port = {}, fd = {}]", port, fd);
+        log::info!(
+            "bound udp socket [ip = {}, port {}, fd = {}]",
+            addr.ip(),
+            port,
+            fd
+        );
 
         Ok((port, Arc::new(Fd(fd))))
     }
 
     fn read4(&self, buf: &mut [u8]) -> Result<(usize, BsdEndpoint), Errno> {
-        log::trace!(
+        log::debug!(
             "received IPv4 packet (block) [fd = {}, max_len = {}]",
             self.socket4.0,
             buf.len()
         );
         debug_assert!(!buf.is_empty(), "reading into empty buffer (will fail)");
 
-        let mut iovs: [libc::iovec; 1] = [libc::iovec {
-            iov_base: buf.as_mut_ptr() as *mut libc::c_void,
-            iov_len: buf.len(),
-        }];
-        let mut src = mem::MaybeUninit::<sockaddr_in>::zeroed();
-        let mut ctrl = mem::MaybeUninit::<ControlHeaderV4>::zeroed();
-        let mut hdr = msghdr {
-            msg_name: src.as_mut_ptr() as *mut libc::c_void,
-            msg_namelen: mem::size_of_val(&src) as u32,
-            msg_iov: iovs.as_mut_ptr(),
-            msg_iovlen: iovs.len() as i32,
-            msg_control: ctrl.as_mut_ptr() as *mut libc::c_void,
-            msg_controllen: mem::size_of_val(&ctrl) as u32,
-            msg_flags: 0,
+        let iovs = [IoVec::from_mut_slice(buf)];
+        let mut cmsg = nix::cmsg_space!(libc::in_addr);
+        let msg = recvmsg(self.socket4.0, &iovs, Some(&mut cmsg), MsgFlags::empty())?;
+
+        let dst = match msg.address {
+            Some(addr) => match addr {
+                SockAddr::Inet(addr) => match addr {
+                    InetAddr::V4(addr) => addr,
+                    InetAddr::V6(_) => unreachable!("ipv4 socket"),
+                },
+                _ => unreachable!("only inet addresses are returned"),
+            },
+            None => panic!("no src found"),
         };
 
-        /*
-        debug_assert!(
-            hdr.msg_controllen >= mem::size_of::<libc::cmsghdr>() + mem::size_of::<libc::in_addr>()
+        let src = match msg.cmsgs().next() {
+            Some(ControlMessageOwned::Ipv4RecvDstAddr(addr)) => addr,
+            Some(x) => panic!("unknown cmsg: {:?}", x),
+            None => panic!("no cmsgs returned"),
+        };
+
+        log::debug!(
+            "[udp rd] src ip: {}:{}",
+            Ipv4Addr::from(u32::from_be(dst.sin_addr.s_addr)),
+            u16::from_be(dst.sin_port)
         );
-        */
-
-        // SAFETY: ensure msghdr struct is properly constructed and fd is a valid file descriptor
-        let len = Errno::result(unsafe { libc::recvmsg(self.socket4.0, &mut hdr as *mut libc::msghdr, 0) })?;
-
-        // SAFETY: the recvmsg call succeeded, we can assume both src and ctrl
-        // have been properly initialized;
-        let src = unsafe { src.assume_init() };
-        let ctrl = unsafe { ctrl.assume_init() };
-
-        log::debug!("[udp rd] src ip: {:?}", ctrl.ip);
-        log::debug!("[udp rd] dst ip: {:?}", src);
+        log::debug!(
+            "[udp rd] dst ip: {}",
+            Ipv4Addr::from(u32::from_be(src.s_addr))
+        );
 
         Ok((
-            len.try_into().expect("failed to convert i32 to usize"),
+            msg.bytes,
             BsdEndpoint::V4 {
-                dst: src,     // future destination is the current source address
-                src: ctrl.ip, // ip of interface this packet came in on
+                dst, // future destination is the current source address
+                src, // ip of interface this packet came in on
             },
         ))
     }
@@ -276,57 +282,22 @@ impl Writer<BsdEndpoint> for BsdUdp {
                     buf.len()
                 );
 
-                log::debug!("[udp wr] src ip: {:?}", src);
-                log::debug!("[udp wr] dst ip: {:?}", dst);
+                log::debug!(
+                    "[udp wr] src ip: {:?}",
+                    Ipv4Addr::from(u32::from_be(src.s_addr))
+                );
+                log::debug!(
+                    "[udp wr] dst ip: {}:{}",
+                    Ipv4Addr::from(u32::from_be(dst.sin_addr.s_addr)),
+                    u16::from_be(dst.sin_port)
+                );
                 log::trace!("[udp wr] {:?}", buf);
 
-                let mut iovs = [libc::iovec {
-                    iov_base: buf.as_ptr() as *mut libc::c_void,
-                    iov_len: buf.len(),
-                }];
-
-                // SAFETY: verify call to CMSG_LEN is good
-                let cmsg_len = unsafe { libc::CMSG_LEN(mem::size_of::<libc::in_addr>() as u32) };
-                let mut control = ControlHeaderV4 {
-                    hdr: cmsghdr {
-                        cmsg_len,
-                        cmsg_level: libc::IPPROTO_IP,
-                        cmsg_type: libc::IP_RECVDSTADDR,
-                    },
-                    ip: *src,
-                };
-
-                // TODO verify control hdr len is aligned to a long
-
-                let mut hdr = msghdr {
-                    msg_name: (dst as *mut sockaddr_in) as *mut libc::c_void,
-                    msg_namelen: mem::size_of_val(dst) as u32,
-                    msg_iov: iovs.as_mut_ptr(),
-                    msg_iovlen: iovs.len() as i32,
-                    msg_control: (&mut control as *mut ControlHeaderV4) as *mut libc::c_void,
-                    msg_controllen: mem::size_of_val(&control) as u32,
-                    msg_flags: 0,
-                };
-
-                // SAFETY: Fd is valid (>1) and hdr is properly constructed
-                let ret = unsafe { libc::sendmsg(self.socket4.0, &hdr, 0) };
-                match Errno::result(ret) {
-                    Ok(_) => Ok(()),
-                    Err(Errno::EINVAL) => {
-                        log::debug!("[udp wr] clear source and retry");
-                        hdr.msg_control = ptr::null_mut();
-                        hdr.msg_controllen = 0;
-                        src.s_addr = 0;
-
-                        // SAFETY: same as previous call, now with null control
-                        Errno::result(unsafe { libc::sendmsg(self.socket4.0, &hdr, 0) })?;
-                        Ok(())
-                    }
-                    Err(e) => {
-                        log::warn!("failed to send ipv4 packet");
-                        Err(e)
-                    }
-                }
+                let iovs = [IoVec::from_slice(buf)];
+                let addr = SockAddr::new_inet(InetAddr::V4(*dst));
+                let sent = sendmsg(self.socket4.0, &iovs, &[], MsgFlags::empty(), Some(&addr))?;
+                log::debug!("[udp wr] sent {} bytes", sent);
+                Ok(())
             }
             BsdEndpoint::V6 {
                 ref mut dst,
@@ -345,7 +316,7 @@ impl Owner for BsdUdp {
         self.port
     }
 
-    fn set_fwmark(&mut self, value: Option<u32>) -> Result<(), Self::Error> {
+    fn set_fwmark(&mut self, _value: Option<u32>) -> Result<(), Self::Error> {
         // not supported on BSD
         Err(Errno::EDOOFUS)
     }
@@ -354,21 +325,21 @@ impl Owner for BsdUdp {
 impl PlatformUDP for BsdUdp {
     type Owner = Self;
 
-    fn bind(mut port: u16) -> Result<(Vec<Self::Reader>, Self::Writer, Self::Owner), Self::Error> {
+    fn bind(port: u16) -> Result<(Vec<Self::Reader>, Self::Writer, Self::Owner), Self::Error> {
+        log::debug!("attempting to bind udp port {}", port);
         let (port4, udp4) = Self::create((IpAddr::from([0u8; 4]), port).into())?;
-        let (port6, udp6) = Self::create((IpAddr::from([0u8; 16]), port).into())?;
+        let (port6, udp6) = Self::create((IpAddr::from([0u8; 16]), port4).into())?;
         if port4 != port6 {
             // ports need to be the same?
             // TODO see if ports can be different
             //return Err(Errno::EADDRINUSE);
             log::warn!("bound different ports [v4: {}, v6: {}]", port4, port6);
         }
-        port = port4;
 
         let owner = BsdUdp {
             socket4: udp4,
             socket6: udp6,
-            port: port4
+            port: port4,
         };
 
         let mut readers: Vec<Self::Reader> = Vec::with_capacity(2);

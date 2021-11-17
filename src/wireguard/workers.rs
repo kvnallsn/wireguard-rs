@@ -58,6 +58,7 @@ pub fn tun_worker<T: Tun, B: UDP>(wg: &WireGuard<T, B>, reader: T::Reader) {
     loop {
         // create vector big enough for any transport message (based on MTU)
         let mtu = wg.mtu.load(Ordering::Relaxed);
+        log::debug!("mtu = {}", mtu);
         let size = mtu + SIZE_MESSAGE_PREFIX + 1;
         let mut msg: Vec<u8> = vec![0; size + CAPACITY_MESSAGE_POSTFIX];
 
@@ -66,7 +67,7 @@ pub fn tun_worker<T: Tun, B: UDP>(wg: &WireGuard<T, B>, reader: T::Reader) {
             Ok(payload) => payload,
             Err(e) => {
                 debug!("TUN worker, failed to read from tun device: {}", e);
-                break;
+                continue;
             }
         };
         debug!("TUN worker, IP packet of {} bytes (MTU = {})", payload, mtu);
